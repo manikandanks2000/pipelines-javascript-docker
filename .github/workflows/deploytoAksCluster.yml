@@ -1,0 +1,50 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: manicontainerregistry.azurecr.io
+        username: ${{ secrets.acr_manicontainerregistry_username }}
+        password: ${{ secrets.acr_manicontainerregistry_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/app" -f  "app/Dockerfile" -t manicontainerregistry.azurecr.io/kubecluster1:${{ github.sha }}
+        docker push manicontainerregistry.azurecr.io/kubecluster1:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_kubecluster1_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep kubecluster1522a | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace kubecluster1522a`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: kubecluster1522a
+        container-registry-url: manicontainerregistry.azurecr.io
+        container-registry-username: ${{ secrets.acr_manicontainerregistry_username }}
+        container-registry-password: ${{ secrets.acr_manicontainerregistry_password }}
+        secret-name: kubecluster1dockerauth
+       
+    - uses: azure/k8s-deploy@v1
+      with:
+        namespace: kubecluster1522a
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+        images: |
+          manicontainerregistry.azurecr.io/kubecluster1:${{ github.sha }}
+        imagepullsecrets: |
+          kubecluster1dockerauth
